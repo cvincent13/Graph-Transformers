@@ -1,5 +1,6 @@
 from tqdm.notebook import tqdm
 import torch
+from IPython.display import clear_output
 
 def train_one_epoch(model, train_loader, epoch, device, optimizer, criterion):
     model.train()
@@ -26,9 +27,9 @@ def train_one_epoch(model, train_loader, epoch, device, optimizer, criterion):
             optimizer.step()
 
             epoch_loss += loss.detach().item()
-            t.disable
     
     epoch_loss = epoch_loss/len(train_loader)
+    clear_output(wait=True)
     return epoch_loss, optimizer
 
 def evaluate(model, val_loader, device, criterion):
@@ -56,4 +57,5 @@ def evaluate(model, val_loader, device, criterion):
             val_loss += loss.detach().item()
 
     val_loss = val_loss/len(val_loader)
+    clear_output(wait=True)
     return val_loss
