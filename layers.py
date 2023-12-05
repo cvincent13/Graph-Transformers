@@ -81,7 +81,7 @@ class TransformerLayer(nn.Module):
             self.normalization1 = nn.Identity()
             self.normalization2 = nn.Identity()
 
-    def forward(self, g, h, device):
+    def forward(self, g, h):
         # Save h for residual connection
         h_residual1 = h
 
@@ -89,9 +89,9 @@ class TransformerLayer(nn.Module):
         # Adjacency Matrix of the batch of graphs, in dense format (with padding if graphs do not have the same number of nodes)
         adj = torch_geometric.utils.to_dense_adj(g.edge_index, g.batch)
         # Attention mask of shape (BatchSize, N_heads, n_nodes, n_nodes)
-        attention_mask_sparse = adj.to(dtype=torch.bool).unsqueeze(1).repeat(1, self.n_head, 1, 1).to(device)
+        attention_mask_sparse = adj.to(dtype=torch.bool).unsqueeze(1).repeat(1, self.n_head, 1, 1)
         # Graph batch format -> dense sequence format with zero-padding (+ fully connected attention mask)
-        x, attention_mask_fully_connected = torch_geometric.utils.to_dense_batch(h, g.batch.to(device))
+        x, attention_mask_fully_connected = torch_geometric.utils.to_dense_batch(h, g.batch)
 
         # Attention mask for addition format
         attention_mask = torch.nn.functional._canonical_mask(mask=attention_mask_sparse,
@@ -105,7 +105,7 @@ class TransformerLayer(nn.Module):
         # Self-attention
         x, scores = self.multihead_attention(x, attention_mask=attention_mask)
         # Go back to batch of graph format
-        h = from_dense_batch(x, g.batch.to(device))
+        h = from_dense_batch(x, g.batch)
 
         # Residual Connection and Normalization
         h = self.normalization1(h+h_residual1)
@@ -147,7 +147,7 @@ class TransformerLayerTorchAttention(nn.Module):
             self.normalization1 = nn.Identity()
             self.normalization2 = nn.Identity()
 
-    def forward(self, g, h, device):
+    def forward(self, g, h):
         # Save h for residual connection
         h_residual1 = h
 
@@ -155,15 +155,15 @@ class TransformerLayerTorchAttention(nn.Module):
         # Adjacency Matrix of the batch of graphs, in dense format (with padding if graphs do not have the same number of nodes)
         adj = torch_geometric.utils.to_dense_adj(g.edge_index, g.batch)
         # Attention mask of shape (BatchSize*N_heads, n_nodes, n_nodes)
-        attention_mask_sparse = adj.to(dtype=torch.bool).repeat(self.n_head, 1, 1).to(device)
+        attention_mask_sparse = adj.to(dtype=torch.bool).repeat(self.n_head, 1, 1)
         # Graph batch format -> dense sequence format with zero-padding (+ fully connected attention mask)
-        x, attention_mask_fully_connected = torch_geometric.utils.to_dense_batch(h, g.batch.to(device))
+        x, attention_mask_fully_connected = torch_geometric.utils.to_dense_batch(h, g.batch)
         # We want (sequence length, batch size, features)
         x = x.permute(1,0,2)
         # Self-attention
         x, att_weights = self.multihead_attention(x, x, x, attn_mask=attention_mask_sparse)
         # Go back to batch of graph format
-        h = from_dense_batch_batch_second(x, g.batch.to(device))
+        h = from_dense_batch_batch_second(x, g.batch)
 
         # Residual Connection and Normalization
         h = self.normalization1(h+h_residual1)
@@ -248,7 +248,7 @@ class TransformerLayerEdges(nn.Module):
             self.normalization1 = nn.Identity()
             self.normalization2 = nn.Identity()
 
-    def forward(self, g, h, e, device):
+    def forward(self, g, h, e):
         # Save h for residual connection
         h_residual1 = h
 
@@ -256,9 +256,9 @@ class TransformerLayerEdges(nn.Module):
         # Adjacency Matrix of the batch of graphs, in dense format (with padding if graphs do not have the same number of nodes)
         adj = torch_geometric.utils.to_dense_adj(g.edge_index, g.batch)
         # Attention mask of shape (BatchSize*N_heads, n_nodes, n_nodes)
-        attention_mask_sparse = adj.to(dtype=torch.bool).unsqueeze(1).repeat(1, self.n_head, 1, 1).to(device)
+        attention_mask_sparse = adj.to(dtype=torch.bool).unsqueeze(1).repeat(1, self.n_head, 1, 1)
         # Graph batch format -> dense sequence format with zero-padding (+ fully connected attention mask)
-        x, attention_mask_fully_connected = torch_geometric.utils.to_dense_batch(h, g.batch.to(device))
+        x, attention_mask_fully_connected = torch_geometric.utils.to_dense_batch(h, g.batch)
 
         # Attention mask for addition format
         attention_mask = torch.nn.functional._canonical_mask(mask=attention_mask_sparse,
@@ -270,7 +270,7 @@ class TransformerLayerEdges(nn.Module):
         # Self-attention
         x, e, scores = self.multihead_attention(x, e, attention_mask=attention_mask)
         # Go back to batch of graph format
-        h = from_dense_batch(x, g.batch.to(device))
+        h = from_dense_batch(x, g.batch)
 
         # Residual Connection and Normalization
         h = self.normalization1(h+h_residual1)

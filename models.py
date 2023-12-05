@@ -54,7 +54,7 @@ class NoPositionalEncoding(nn.Module):
 
 # Graph Transformer
 class GraphTransformer(nn.Module):
-    def __init__(self, device, n_token_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm):
+    def __init__(self, n_token_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm):
         super(GraphTransformer, self).__init__()
         """
         n_token_input: input size for the embedding
@@ -64,7 +64,6 @@ class GraphTransformer(nn.Module):
         n_layers: the number of nn.TransformerEncoderLayer in nn.TransformerEncoder
         dropout: the dropout value
         """
-        self.device = device
         # Embedding 
         self.embedding = nn.Embedding(n_token_input, n_hidden)
         # Positional Encoding
@@ -82,13 +81,13 @@ class GraphTransformer(nn.Module):
         h = self.pos_encoder(h, precomputed_eigenvectors)
         # Transformer Block
         for layer in self.transformer_block:
-            h = layer(g, h, self.device)
+            h = layer(g, h)
 
         return h
     
 
 class GraphTransformerEdges(nn.Module):
-    def __init__(self, device, n_token_input, n_edges_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm):
+    def __init__(self, n_token_input, n_edges_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm):
         super(GraphTransformerEdges, self).__init__()
         """
         n_token_input: input size for the embedding
@@ -98,7 +97,6 @@ class GraphTransformerEdges(nn.Module):
         n_layers: the number of nn.TransformerEncoderLayer in nn.TransformerEncoder
         dropout: the dropout value
         """
-        self.device = device
         # Embedding 
         self.embedding = nn.Embedding(n_token_input, n_hidden)
         self.embedding_e = nn.Embedding(n_edges_input, n_hidden)
@@ -113,14 +111,14 @@ class GraphTransformerEdges(nn.Module):
     def forward(self, g, h, precomputed_eigenvectors=None):
         # Embedding
         h = self.embedding(h)
-        e = g.edge_attr.to(self.device)
+        e = g.edge_attr
         e = self.embedding_e(e)
-        e = torch_geometric.utils.to_dense_adj(g.edge_index.to(self.device), batch=g.batch.to(self.device), edge_attr=e)
+        e = torch_geometric.utils.to_dense_adj(g.edge_index, batch=g.batch, edge_attr=e)
         # Positional Encoding
         h = self.pos_encoder(h, precomputed_eigenvectors)
         # Transformer Block
         for layer in self.transformer_block:
-            h, e = layer(g, h, e, self.device)
+            h, e = layer(g, h, e)
 
         return h
 
@@ -168,10 +166,9 @@ class NodeClassificationGraphTransformer(nn.Module):
     
 
 class GraphRegressionGraphTransformer(nn.Module):
-    def __init__(self, device, n_token_input, n_hidden=80, n_head=8, n_feedforward=160, n_layers=10, input_dropout=0.1, dropout=0.5, k=None, norm='layer', readout='mean'):
+    def __init__(self, n_token_input, n_hidden=80, n_head=8, n_feedforward=160, n_layers=10, input_dropout=0.1, dropout=0.5, k=None, norm='layer', readout='mean'):
         super(GraphRegressionGraphTransformer, self).__init__()
-        self.device = device
-        self.graph_transformer = GraphTransformer(device, n_token_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm)
+        self.graph_transformer = GraphTransformer(n_token_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm)
         self.regression_head = GraphRegressionHead(n_hidden)
 
         if readout == "sum":
@@ -186,7 +183,7 @@ class GraphRegressionGraphTransformer(nn.Module):
     def forward(self, g, h, precomputed_eigenvectors=None):
         h = self.graph_transformer(g, h, precomputed_eigenvectors=precomputed_eigenvectors)
 
-        h_graph = self.readout(h, g.batch.to(self.device))
+        h_graph = self.readout(h, g.batch)
         
         h_graph = self.regression_head(h_graph)
         return h_graph
