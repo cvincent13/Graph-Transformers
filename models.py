@@ -54,10 +54,10 @@ class NoPositionalEncoding(nn.Module):
 
 # Graph Transformer
 class GraphTransformer(nn.Module):
-    def __init__(self, n_token_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm):
+    def __init__(self, n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm):
         super(GraphTransformer, self).__init__()
         """
-        n_token_input: input size for the embedding
+        n_nodes_input: input size for the embedding
         n_hidden: the hidden dimension of the model
         n_feedforward: dimension for the feedforward network
         n_head: the number of heads in the multiheadattention models
@@ -65,7 +65,7 @@ class GraphTransformer(nn.Module):
         dropout: the dropout value
         """
         # Embedding 
-        self.embedding = nn.Embedding(n_token_input, n_hidden)
+        self.embedding = nn.Embedding(n_nodes_input, n_hidden)
         # Positional Encoding
         self.pos_encoder = LaplacianPositionalEncoding(k, n_hidden, dropout=input_dropout)
         #Transformer Block
@@ -87,10 +87,10 @@ class GraphTransformer(nn.Module):
     
 
 class GraphTransformerEdges(nn.Module):
-    def __init__(self, n_token_input, n_edges_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm):
+    def __init__(self, n_nodes_input, n_edges_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm):
         super(GraphTransformerEdges, self).__init__()
         """
-        n_token_input: input size for the embedding
+        n_nodes_input: input size for the embedding
         n_hidden: the hidden dimension of the model
         n_feedforward: dimension for the feedforward network
         n_head: the number of heads in the multiheadattention models
@@ -98,7 +98,7 @@ class GraphTransformerEdges(nn.Module):
         dropout: the dropout value
         """
         # Embedding 
-        self.embedding = nn.Embedding(n_token_input, n_hidden)
+        self.embedding = nn.Embedding(n_nodes_input, n_hidden)
         self.embedding_e = nn.Embedding(n_edges_input, n_hidden)
         # Positional Encoding
         self.pos_encoder = LaplacianPositionalEncoding(k, n_hidden, dropout=input_dropout)
@@ -154,9 +154,9 @@ class GraphRegressionHead(nn.Module):
 
 # Models
 class NodeClassificationGraphTransformer(nn.Module):
-    def __init__(self, n_token_input, n_hidden, n_head, n_feedforward, n_layers, n_classes, input_dropout=0.1, dropout=0.5, k=None, norm='layer'):
+    def __init__(self, n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, n_classes, input_dropout=0.1, dropout=0.5, k=None, norm='layer'):
         super(NodeClassificationGraphTransformer, self).__init__()
-        self.graph_transformer = GraphTransformer(n_token_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm)
+        self.graph_transformer = GraphTransformer(n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm)
         self.classification_head = ClassificationHead(n_hidden, n_classes)
 
     def forward(self, g, h, precomputed_eigenvectors=None):
@@ -166,9 +166,9 @@ class NodeClassificationGraphTransformer(nn.Module):
     
 
 class GraphRegressionGraphTransformer(nn.Module):
-    def __init__(self, n_token_input, n_hidden=80, n_head=8, n_feedforward=160, n_layers=10, input_dropout=0.1, dropout=0.5, k=None, norm='layer', readout='mean'):
+    def __init__(self, n_nodes_input, n_hidden=80, n_head=8, n_feedforward=160, n_layers=10, input_dropout=0.1, dropout=0.5, k=None, norm='layer', readout='mean'):
         super(GraphRegressionGraphTransformer, self).__init__()
-        self.graph_transformer = GraphTransformer(n_token_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm)
+        self.graph_transformer = GraphTransformer(n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm)
         self.regression_head = GraphRegressionHead(n_hidden)
 
         if readout == "sum":
@@ -190,9 +190,9 @@ class GraphRegressionGraphTransformer(nn.Module):
     
 
 class GraphRegressionGraphTransformerEdges(nn.Module):
-    def __init__(self, n_token_input, n_edges_input, n_hidden=80, n_head=8, n_feedforward=160, n_layers=10, input_dropout=0.1, dropout=0.5, k=None, norm='layer', readout='mean'):
+    def __init__(self, n_nodes_input, n_edges_input, n_hidden=80, n_head=8, n_feedforward=160, n_layers=10, input_dropout=0.1, dropout=0.5, k=None, norm='layer', readout='mean'):
         super(GraphRegressionGraphTransformerEdges, self).__init__()
-        self.graph_transformer = GraphTransformerEdges(n_token_input, n_edges_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm)
+        self.graph_transformer = GraphTransformerEdges(n_nodes_input, n_edges_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm)
         self.regression_head = GraphRegressionHead(n_hidden)
 
         if readout == "sum":
