@@ -72,7 +72,7 @@ def from_dense_batch_batch_second(x, batch_idx):
 
 # Graph Transformer
 class GraphTransformer(nn.Module):
-    def __init__(self, n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm):
+    def __init__(self, n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, pos_encoding, norm):
         super(GraphTransformer, self).__init__()
         """
         n_nodes_input: input size for the embedding
@@ -86,7 +86,12 @@ class GraphTransformer(nn.Module):
         # Embedding 
         self.embedding = nn.Embedding(n_nodes_input, n_hidden)
         # Positional Encoding
-        self.pos_encoder = LaplacianPositionalEncoding(k, n_hidden, dropout=input_dropout)
+        if pos_encoding == 'laplacian':
+            self.pos_encoder = LaplacianPositionalEncoding(k, n_hidden, dropout=input_dropout)
+        elif pos_encoding == 'wl':
+            self.pos_encoder = WLPositionalEncoding(k, n_hidden, dropout=dropout)
+        else:
+            self.pos_encoder = NoPositionalEncoding(k, n_hidden, dropout=input_dropout)
         #Transformer Block
         self.transformer_block = nn.ModuleList([TransformerLayer(n_hidden, n_head, n_feedforward, dropout, norm) for _ in range(n_layers-1)])
         self.transformer_block.append(TransformerLayer(n_hidden, n_head, n_feedforward, dropout, norm))
@@ -102,29 +107,24 @@ class GraphTransformer(nn.Module):
         # Adjacency Matrix of the batch of graphs, in dense format (with padding if graphs do not have the same number of nodes)
         adj = torch_geometric.utils.to_dense_adj(g.edge_index, g.batch)
         # Attention mask of shape (BatchSize, N_heads, n_nodes, n_nodes)
-        attention_mask_sparse = adj.to(dtype=torch.bool).unsqueeze(1).repeat(1, self.n_head, 1, 1)
-        # Graph batch format -> dense sequence format with zero-padding (+ fully connected attention mask)
-        x, attention_mask_fully_connected = torch_geometric.utils.to_dense_batch(h, g.batch)
-        # Attention mask for addition format
-        attention_mask = torch.nn.functional._canonical_mask(mask=attention_mask_sparse,
-                                                            mask_name="attention_mask",
-                                                            other_type=None,
-                                                            other_name="",
-                                                            target_type=torch.float,
-                                                            check_other=False,)
+        attention_mask = (1.0-adj).unsqueeze(1).repeat(1, self.n_head, 1, 1)*(-100)
+        # Graph batch format -> dense sequence format with zero-padding
+        x, padding_mask = torch_geometric.utils.to_dense_batch(h, g.batch)
+        padding_mask = padding_mask.unsqueeze(1).repeat(1,self.n_head,1).unsqueeze(-1)
 
-
+        attention_scores = []
         for layer in self.transformer_block:
-            x = layer(x, attention_mask)
+            x, scores = layer(x, attention_mask, padding_mask)
+            attention_scores.append(scores)
 
         # Go back to batch of graph format
         h = from_dense_batch(x, g.batch)
 
-        return h
+        return h, attention_scores
     
 
 class GraphTransformerEdges(nn.Module):
-    def __init__(self, n_nodes_input, n_edges_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm):
+    def __init__(self, n_nodes_input, n_edges_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, pos_encoding, norm):
         super(GraphTransformerEdges, self).__init__()
         """
         n_nodes_input: input size for the embedding
@@ -139,7 +139,12 @@ class GraphTransformerEdges(nn.Module):
         self.embedding = nn.Embedding(n_nodes_input, n_hidden)
         self.embedding_e = nn.Embedding(n_edges_input, n_hidden)
         # Positional Encoding
-        self.pos_encoder = LaplacianPositionalEncoding(k, n_hidden, dropout=input_dropout)
+        if pos_encoding == 'laplacian':
+            self.pos_encoder = LaplacianPositionalEncoding(k, n_hidden, dropout=input_dropout)
+        elif pos_encoding == 'wl':
+            self.pos_encoder = WLPositionalEncoding(k, n_hidden, dropout=dropout)
+        else:
+            self.pos_encoder = NoPositionalEncoding(k, n_hidden, dropout=input_dropout)
         #Transformer Block
         self.transformer_block = nn.ModuleList([TransformerLayerEdges(n_hidden, n_head, n_feedforward, dropout, norm) for _ in range(n_layers-1)])
         self.transformer_block.append(TransformerLayerEdges(n_hidden, n_head, n_feedforward, dropout, norm))
@@ -159,28 +164,23 @@ class GraphTransformerEdges(nn.Module):
         # Adjacency Matrix of the batch of graphs, in dense format (with padding if graphs do not have the same number of nodes)
         adj = torch_geometric.utils.to_dense_adj(g.edge_index, g.batch)
         # Attention mask of shape (BatchSize*N_heads, n_nodes, n_nodes)
-        attention_mask_sparse = adj.to(dtype=torch.bool).unsqueeze(1).repeat(1, self.n_head, 1, 1)
-        # Graph batch format -> dense sequence format with zero-padding (+ fully connected attention mask)
-        x, attention_mask_fully_connected = torch_geometric.utils.to_dense_batch(h, g.batch)
-
-        # Attention mask for addition format
-        attention_mask = torch.nn.functional._canonical_mask(mask=attention_mask_sparse,
-                                                            mask_name="attention_mask",
-                                                            other_type=None,
-                                                            other_name="",
-                                                            target_type=torch.float,
-                                                            check_other=False,)
+        attention_mask = (1.0-adj).unsqueeze(1).repeat(1, self.n_head, 1, 1)*(-100)
+        # Graph batch format -> dense sequence format with zero-padding
+        x, padding_mask = torch_geometric.utils.to_dense_batch(h, g.batch)
+        padding_mask = padding_mask.unsqueeze(1).repeat(1,self.n_head,1).unsqueeze(-1)
         
+        attention_scores = []
         for layer in self.transformer_block:
-            x, e = layer(x, e, attention_mask)
+            x, e, scores = layer(x, e, attention_mask, padding_mask)
+            attention_scores.append(scores)
 
         # Go back to batch of graph format
         h = from_dense_batch(x, g.batch)
 
-        return h
+        return h, attention_scores
     
 class GraphTransformerTorchAttention(nn.Module):
-    def __init__(self, n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm):
+    def __init__(self, n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, pos_encoding, norm):
         super(GraphTransformerTorchAttention, self).__init__()
         """
         n_nodes_input: input size for the embedding
@@ -194,7 +194,12 @@ class GraphTransformerTorchAttention(nn.Module):
         # Embedding 
         self.embedding = nn.Embedding(n_nodes_input, n_hidden)
         # Positional Encoding
-        self.pos_encoder = LaplacianPositionalEncoding(k, n_hidden, dropout=input_dropout)
+        if pos_encoding == 'laplacian':
+            self.pos_encoder = LaplacianPositionalEncoding(k, n_hidden, dropout=input_dropout)
+        elif pos_encoding == 'wl':
+            self.pos_encoder = WLPositionalEncoding(k, n_hidden, dropout=dropout)
+        else:
+            self.pos_encoder = NoPositionalEncoding(k, n_hidden, dropout=input_dropout)
         #Transformer Block
         self.transformer_block = nn.ModuleList([TransformerLayerTorchAttention(n_hidden, n_head, n_feedforward, dropout, norm) for _ in range(n_layers-1)])
         self.transformer_block.append(TransformerLayerTorchAttention(n_hidden, n_head, n_feedforward, dropout, norm))
@@ -212,18 +217,19 @@ class GraphTransformerTorchAttention(nn.Module):
         # Attention mask of shape (BatchSize*N_heads, n_nodes, n_nodes)
         attention_mask_sparse = adj.to(dtype=torch.bool).repeat(self.n_head, 1, 1)
         # Graph batch format -> dense sequence format with zero-padding (+ fully connected attention mask)
-        x, attention_mask_fully_connected = torch_geometric.utils.to_dense_batch(h, g.batch)
+        x, _ = torch_geometric.utils.to_dense_batch(h, g.batch)
         # We want (sequence length, batch size, features)
         x = x.permute(1,0,2)
 
-
+        attention_scores = []
         for layer in self.transformer_block:
-            x = layer(x, attention_mask_sparse)
+            x, scores = layer(x, attention_mask_sparse)
+            attention_scores.append(scores)
 
         # Go back to batch of graph format
         h = from_dense_batch_batch_second(x, g.batch)
 
-        return h
+        return h, attention_scores
 
 
 # Prediction Heads
@@ -256,22 +262,27 @@ class GraphRegressionHead(nn.Module):
     
 
 # Models
+# Node Level
 class NodeClassificationGraphTransformer(nn.Module):
-    def __init__(self, n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, n_classes, input_dropout=0.1, dropout=0.5, k=None, norm='layer'):
+    def __init__(self, n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, n_classes, input_dropout=0.1, dropout=0.5, 
+    k=None, pos_encoding='laplacian', norm='layer'):
         super(NodeClassificationGraphTransformer, self).__init__()
-        self.graph_transformer = GraphTransformer(n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm)
+        self.n_classes = n_classes
+        self.graph_transformer = GraphTransformer(n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, pos_encoding, norm)
         self.classification_head = ClassificationHead(n_hidden, n_classes)
 
     def forward(self, g, h, precomputed_eigenvectors=None):
-        h = self.graph_transformer(g, h, precomputed_eigenvectors=precomputed_eigenvectors)
+        h, attention_scores = self.graph_transformer(g, h, precomputed_eigenvectors=precomputed_eigenvectors)
         h = self.classification_head(h)
-        return h
+        return h, attention_scores
     
 
+# Graph Level
 class GraphRegressionGraphTransformer(nn.Module):
-    def __init__(self, n_nodes_input, n_hidden=80, n_head=8, n_feedforward=160, n_layers=10, input_dropout=0.1, dropout=0.5, k=None, norm='layer', readout='mean'):
+    def __init__(self, n_nodes_input, n_hidden=80, n_head=8, n_feedforward=160, n_layers=10, input_dropout=0.1, dropout=0.5, 
+    k=None, pos_encoding='laplacian', norm='layer', readout='mean'):
         super(GraphRegressionGraphTransformer, self).__init__()
-        self.graph_transformer = GraphTransformer(n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm)
+        self.graph_transformer = GraphTransformer(n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, pos_encoding, norm)
         self.regression_head = GraphRegressionHead(n_hidden)
 
         if readout == "sum":
@@ -284,18 +295,19 @@ class GraphRegressionGraphTransformer(nn.Module):
             self.readout = readout
 
     def forward(self, g, h, precomputed_eigenvectors=None):
-        h = self.graph_transformer(g, h, precomputed_eigenvectors=precomputed_eigenvectors)
+        h, attention_scores = self.graph_transformer(g, h, precomputed_eigenvectors=precomputed_eigenvectors)
 
         h_graph = self.readout(h, g.batch)
         
         h_graph = self.regression_head(h_graph)
-        return h_graph
+        return h_graph, attention_scores
     
 
 class GraphRegressionGraphTransformerEdges(nn.Module):
-    def __init__(self, n_nodes_input, n_edges_input, n_hidden=80, n_head=8, n_feedforward=160, n_layers=10, input_dropout=0.1, dropout=0.5, k=None, norm='layer', readout='mean'):
+    def __init__(self, n_nodes_input, n_edges_input, n_hidden=80, n_head=8, n_feedforward=160, n_layers=10, input_dropout=0.1, dropout=0.5, 
+    k=None, pos_encoding='laplacian', norm='layer', readout='mean'):
         super(GraphRegressionGraphTransformerEdges, self).__init__()
-        self.graph_transformer = GraphTransformerEdges(n_nodes_input, n_edges_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, norm)
+        self.graph_transformer = GraphTransformerEdges(n_nodes_input, n_edges_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, pos_encoding, norm)
         self.regression_head = GraphRegressionHead(n_hidden)
 
         if readout == "sum":
@@ -308,9 +320,55 @@ class GraphRegressionGraphTransformerEdges(nn.Module):
             self.readout = readout
 
     def forward(self, g, h, precomputed_eigenvectors=None):
-        h = self.graph_transformer(g, h, precomputed_eigenvectors=precomputed_eigenvectors)
+        h, attention_scores = self.graph_transformer(g, h, precomputed_eigenvectors=precomputed_eigenvectors)
 
         h_graph = self.readout(h, g.batch)
         
         h_graph = self.regression_head(h_graph)
-        return h_graph
+        return h_graph, attention_scores
+    
+
+class GraphRepresentationGraphTransformer(nn.Module):
+    def __init__(self, n_nodes_input, n_hidden=80, n_head=8, n_feedforward=160, n_layers=10, input_dropout=0.1, dropout=0.5, 
+    k=None, pos_encoding='laplacian', norm='layer', readout='mean'):
+        super(GraphRepresentationGraphTransformer, self).__init__()
+        self.graph_transformer = GraphTransformer(n_nodes_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, pos_encoding, norm)
+
+        if readout == "sum":
+            self.readout = torch_geometric.nn.aggr.SumAggregation()
+        elif readout == "max":
+            self.readout = torch_geometric.nn.aggr.MaxAggregation()
+        elif readout == "mean":
+            self.readout = torch_geometric.nn.aggr.MeanAggregation()
+        else:
+            self.readout = readout
+
+    def forward(self, g, h, precomputed_eigenvectors=None):
+        h, attention_scores = self.graph_transformer(g, h, precomputed_eigenvectors=precomputed_eigenvectors)
+
+        h_graph = self.readout(h, g.batch)
+        
+        return h_graph, attention_scores
+    
+
+class GraphRepresentationGraphTransformerEdges(nn.Module):
+    def __init__(self, n_nodes_input, n_edges_input, n_hidden=80, n_head=8, n_feedforward=160, n_layers=10, input_dropout=0.1, dropout=0.5, 
+    k=None, pos_encoding='laplacian', norm='layer', readout='mean'):
+        super(GraphRepresentationGraphTransformerEdges, self).__init__()
+        self.graph_transformer = GraphTransformerEdges(n_nodes_input, n_edges_input, n_hidden, n_head, n_feedforward, n_layers, input_dropout, dropout, k, pos_encoding, norm)
+
+        if readout == "sum":
+            self.readout = torch_geometric.nn.aggr.SumAggregation()
+        elif readout == "max":
+            self.readout = torch_geometric.nn.aggr.MaxAggregation()
+        elif readout == "mean":
+            self.readout = torch_geometric.nn.aggr.MeanAggregation()
+        else:
+            self.readout = readout
+
+    def forward(self, g, h, precomputed_eigenvectors=None):
+        h, attention_scores = self.graph_transformer(g, h, precomputed_eigenvectors=precomputed_eigenvectors)
+
+        h_graph = self.readout(h, g.batch)
+        
+        return h_graph, attention_scores

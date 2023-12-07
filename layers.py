@@ -20,14 +20,14 @@ class MultiHeadAttention(nn.Module):
         self.out_dropout = nn.Dropout(dropout)
         self.O = nn.Linear(n_hidden, n_hidden)
 
-    def forward(self, x, attention_mask=None):
+    def forward(self, x, attention_mask, padding_mask):
         batch_size = x.size(0)
 
         Q_x = self.Q(x).view(batch_size, -1, self.n_head, self.dim_head).permute((0,2,1,3))
         K_x = self.K(x).view(batch_size, -1, self.n_head, self.dim_head).permute((0,2,1,3))
         V_x = self.K(x).view(batch_size, -1, self.n_head, self.dim_head).permute((0,2,1,3))
 
-        scores = F.softmax(attention_mask + (Q_x @ K_x.transpose(-2,-1))/np.sqrt(self.dim_head), dim=-1)
+        scores = F.softmax(attention_mask + (Q_x @ K_x.transpose(-2,-1))/np.sqrt(self.dim_head), dim=-1)*padding_mask
 
         attended_values = torch.matmul(scores, V_x)
         attended_values = attended_values.permute((0,2,1,3)).contiguous().view(batch_size, -1, self.n_hidden)
@@ -35,13 +35,15 @@ class MultiHeadAttention(nn.Module):
         attended_values = self.out_dropout(attended_values)
         x = self.O(attended_values)
 
+        scores = scores.detach().cpu().numpy()
+
         return x, scores
     
 
 class TransformerLayer(nn.Module):
     def __init__(self, n_hidden, n_head, n_feedforward, dropout, norm):
         super(TransformerLayer, self).__init__()
-
+        self.norm = norm
         # Multi-head Attention
         self.multihead_attention = MultiHeadAttention(n_hidden, n_head, dropout)
 
@@ -63,12 +65,12 @@ class TransformerLayer(nn.Module):
             self.normalization1 = nn.Identity()
             self.normalization2 = nn.Identity()
 
-    def forward(self, x, attention_mask):
+    def forward(self, x, attention_mask, padding_mask):
         # Save h for residual connection
         x_residual1 = x
 
         # Self-attention
-        x, scores = self.multihead_attention(x, attention_mask=attention_mask)
+        x, scores = self.multihead_attention(x, attention_mask, padding_mask)
         
         # Residual Connection and Normalization
         if self.norm == 'batch':
@@ -86,7 +88,7 @@ class TransformerLayer(nn.Module):
         else:
             x = self.normalization2(x+x_residual2)
 
-        return x
+        return x, scores
 
 
 class TransformerLayerTorchAttention(nn.Module):
@@ -139,7 +141,7 @@ class TransformerLayerTorchAttention(nn.Module):
         else:
             x = self.normalization2(x+x_residual2)
 
-        return x
+        return x, att_weights
 
 
 # Layers with Edges
@@ -159,7 +161,7 @@ class MultiHeadAttentionEdges(nn.Module):
         self.Oh = nn.Linear(n_hidden, n_hidden)
         self.Oe = nn.Linear(n_hidden, n_hidden)
 
-    def forward(self, x, e, attention_mask=None):
+    def forward(self, x, e, attention_mask, padding_mask):
         batch_size = x.size(0)
         edge_size = e.size(1)
 
@@ -170,7 +172,7 @@ class MultiHeadAttentionEdges(nn.Module):
 
 
         intermediate_scores = (Q_x[:,:,:, np.newaxis, :] * K_x[:,:,np.newaxis, :, :] * E_e)/np.sqrt(self.dim_head)
-        scores = F.softmax(attention_mask + intermediate_scores.sum(-1), dim=-1)
+        scores = F.softmax(attention_mask + intermediate_scores.sum(-1), dim=-1)*padding_mask
 
         e = intermediate_scores.permute((0,2,3,1,4)).contiguous().view(batch_size, edge_size, edge_size, self.n_hidden)
         e = self.out_dropout(e)
@@ -180,6 +182,8 @@ class MultiHeadAttentionEdges(nn.Module):
         attended_values = attended_values.permute((0,2,1,3)).contiguous().view(batch_size, -1, self.n_hidden)
         attended_values = self.out_dropout(attended_values)
         x = self.Oh(attended_values)
+
+        scores = scores.detach().cpu().numpy()
 
         return x, e, scores
 
@@ -223,8 +227,7 @@ class TransformerLayerEdges(nn.Module):
             self.normalization1_e = nn.Identity()
             self.normalization2_e = nn.Identity()
 
-    def forward(self, x, e, attention_mask):
-        batch_size = x.size(0)
+    def forward(self, x, e, attention_mask, padding_mask):
         # Save x, e for residual connection
         x_residual1 = x
         e_residual1 = e
@@ -232,7 +235,7 @@ class TransformerLayerEdges(nn.Module):
         # Multi-head Attention
         
         # Self-attention
-        x, e, scores = self.multihead_attention(x, e, attention_mask=attention_mask)
+        x, e, scores = self.multihead_attention(x, e, attention_mask, padding_mask)
         
         # Residual Connection and Normalization
         if self.norm == 'batch':
@@ -257,4 +260,4 @@ class TransformerLayerEdges(nn.Module):
             x = self.normalization1_x(x+x_residual2)
             e = self.normalization1_e(e+e_residual2)
 
-        return x, e
+        return x, e, scores
