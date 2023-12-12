@@ -110,3 +110,10 @@ class SBMDataset(T.BaseTransform):
         graph.x = h
         return graph
     
+class ZINCDataset(T.BaseTransform):
+    def __call__(self, graph):
+        h = graph.x
+        h = h[:,0]
+        graph.x = h
+        return graph
+    

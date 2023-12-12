@@ -22,6 +22,8 @@ def train_one_epoch(model, train_loader, epoch, device, optimizer, criterion, po
                 precomputed_eigenvectors = precomputed_eigenvectors * sign_flip.unsqueeze(0)
             elif pos_encoding == 'wl':
                 precomputed_eigenvectors = g.wl_encoding
+            elif pos_encoding == 'both':
+                precomputed_eigenvectors = (g.laplacian_eigs, g.wl_encoding)
             else:
                 precomputed_eigenvectors = None
 
@@ -68,6 +70,8 @@ def evaluate(model, val_loader, device, criterion, pos_encoding='laplacian', acc
                 precomputed_eigenvectors = precomputed_eigenvectors * sign_flip.unsqueeze(0)
             elif pos_encoding == 'wl':
                 precomputed_eigenvectors = g.wl_encoding
+            elif pos_encoding == 'both':
+                precomputed_eigenvectors = (g.laplacian_eigs, g.wl_encoding)
             else:
                 precomputed_eigenvectors = None
 
